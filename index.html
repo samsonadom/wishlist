@@ -1,27 +1,372 @@
-const CACHE = 'app-cache-v1';
-const FILES = ['./', './index.html'];
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Wishlist">
+<meta name="theme-color" content="#f7f0ec">
+<link rel="apple-touch-icon" id="appIcon">
+<title>Wishlist</title>
+<style>
+  :root{
+    --bg:#f7f0ec; --card:#fffcfa; --rail:#efe4de; --ink:#2d2427; --muted:#9b8a8f;
+    --accent:#c2627a; --accent-soft:#f3dde3; --line:#eadcd6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#1b1719; --card:#272124; --rail:#221d20; --ink:#f6eef0; --muted:#8e8085;
+           --accent:#e07d96; --accent-soft:#3e2a31; --line:#3a3135; }
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif}
+  body{display:flex;overflow:hidden}
 
-self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)));
-  self.skipWaiting();
-});
+  /* Left bar */
+  nav{width:72px;flex:none;background:var(--rail);display:flex;flex-direction:column;align-items:center;
+    padding:calc(env(safe-area-inset-top) + 20px) 0 calc(env(safe-area-inset-bottom) + 20px);
+    padding-left:env(safe-area-inset-left)}
+  nav button{border:none;background:none;color:var(--muted);display:flex;flex-direction:column;
+    align-items:center;gap:4px;font-size:11px;font-weight:600;padding:10px 0;width:56px;border-radius:16px}
+  nav button svg{width:26px;height:26px}
+  nav button.on{background:var(--card);color:var(--accent)}
+  nav .bottom{margin-top:auto}
 
-self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys =>
-    Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))));
-  self.clients.claim();
-});
+  main{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    padding:calc(env(safe-area-inset-top) + 20px) 18px calc(env(safe-area-inset-bottom) + 30px)}
+  .view{display:none} .view.on{display:block}
+  h1{font-size:32px;margin:0;letter-spacing:-0.5px}
+  .sub{color:var(--muted);font-size:15px;margin:4px 0 18px}
 
-// Opens instantly from the saved copy, and quietly updates it in the background
-self.addEventListener('fetch', e => {
-  const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  e.respondWith(caches.open(CACHE).then(async cache => {
-    const cached = await cache.match(e.request, { ignoreSearch: true });
-    const network = fetch(e.request).then(res => {
-      if (res.ok) cache.put(e.request, res.clone());
-      return res;
-    }).catch(() => cached);
-    return cached || network;
-  }));
-});
+  /* Widget 1: the list */
+  .table{background:var(--card);border-radius:20px;overflow:hidden}
+  .row{display:flex;align-items:center;gap:12px;padding:12px;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:none}
+  .thumb{width:60px;height:60px;flex:none;border-radius:12px;object-fit:cover;background:var(--accent-soft);
+    display:grid;place-items:center;font-size:24px;font-weight:700;color:var(--accent)}
+  .info{flex:1;min-width:0}
+  .title{font-size:16px;font-weight:600;overflow-wrap:anywhere}
+  .meta{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:12px;color:var(--muted)}
+  .pill{background:var(--accent-soft);color:var(--accent);padding:3px 8px;border-radius:999px;font-weight:600}
+  .del{border:none;background:none;color:var(--muted);font-size:24px;padding:4px;line-height:1}
+  .empty{text-align:center;color:var(--muted);padding:50px 20px;font-size:15px;line-height:1.5}
+
+  /* Widget 2: add a want */
+  .lbl{display:block;font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.5px;margin:24px 0 8px}
+  input[type=text]{width:100%;border:none;background:var(--card);border-radius:14px;padding:14px;
+    font-size:17px;color:var(--ink);outline:none}
+  .btn{display:block;border:none;border-radius:14px;padding:14px;font-size:16px;font-weight:600;
+    width:100%;margin-top:10px;text-align:center;font-family:inherit;cursor:pointer}
+  .primary{background:var(--accent);color:#fff}
+  .primary:disabled{opacity:.4}
+  .ghost{background:var(--card);color:var(--ink)}
+  .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .grid img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:12px;
+    border:3px solid transparent;background:var(--card)}
+  .grid img.sel{border-color:var(--accent)}
+  .note{font-size:14px;color:var(--muted);margin:0 0 10px}
+  .links{display:flex;gap:8px}
+  .links .btn{flex:1;font-size:14px;padding:12px 6px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chips button{border:none;background:var(--card);color:var(--ink);padding:9px 14px;
+    border-radius:999px;font-size:15px}
+  .chips button.on{background:var(--accent);color:#fff}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<nav>
+  <button id="tabList" class="on" aria-label="My wants">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1"/><circle cx="3.5" cy="12" r="1"/><circle cx="3.5" cy="18" r="1"/>
+    </svg>
+    Wants
+  </button>
+  <button id="tabAdd" class="bottom" aria-label="Add a want">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>
+    </svg>
+    Add
+  </button>
+</nav>
+
+<main id="main">
+  <!-- Widget 1 -->
+  <section id="viewList" class="view on">
+    <h1>Wishlist</h1>
+    <p class="sub" id="count"></p>
+    <div id="table"></div>
+  </section>
+
+  <!-- Widget 2 -->
+  <section id="viewAdd" class="view">
+    <h1>New want</h1>
+    <p class="sub">What are you saving up for?</p>
+    <input type="text" id="name" placeholder="e.g. AirPods Pro" autocomplete="off" enterkeyhint="search">
+    <button class="btn primary" id="findBtn">Find a picture</button>
+
+    <div id="picStep" class="hidden">
+      <span class="lbl">Is one of these right?</span>
+      <p class="note" id="searchNote"></p>
+      <div class="grid" id="grid"></div>
+      <div class="links">
+        <label class="btn ghost" for="file">Use my own photo</label>
+        <button class="btn ghost" id="googleBtn">Search Google</button>
+      </div>
+      <input type="file" id="file" accept="image/*" class="hidden">
+
+      <span class="lbl">Category</span>
+      <div class="chips" id="chips"></div>
+
+      <button class="btn primary" id="addBtn" disabled>Add to wishlist</button>
+      <button class="btn ghost" id="noPicBtn">Add without a picture</button>
+    </div>
+  </section>
+</main>
+
+<script>
+  const CATEGORIES = ['Personal', 'Work', 'Fashion', 'Healthcare'];
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const newId = () => (crypto.randomUUID ? crypto.randomUUID()
+    : Date.now() + '-' + Math.random().toString(36).slice(2));
+
+  /* ---------- Storage (saved on your phone, works offline) ---------- */
+  const dbReady = new Promise((res, rej) => {
+    const r = indexedDB.open('wishlist', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('wants', { keyPath: 'id' });
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+  async function tx(mode, fn) {
+    const db = await dbReady;
+    return new Promise((res, rej) => {
+      const t = db.transaction('wants', mode);
+      const req = fn(t.objectStore('wants'));
+      t.oncomplete = () => res(req && req.result);
+      t.onerror = () => rej(t.error);
+    });
+  }
+  const getAll = () => tx('readonly', s => s.getAll());
+  const save = w => tx('readwrite', s => s.put(w));
+  const remove = id => tx('readwrite', s => s.delete(id));
+
+  /* ---------- Switching between the two widgets ---------- */
+  function show(which) {
+    $('tabList').classList.toggle('on', which === 'list');
+    $('tabAdd').classList.toggle('on', which === 'add');
+    $('viewList').classList.toggle('on', which === 'list');
+    $('viewAdd').classList.toggle('on', which === 'add');
+    $('main').scrollTop = 0;
+  }
+  $('tabList').onclick = () => show('list');
+  $('tabAdd').onclick = () => { show('add'); $('name').focus(); };
+
+  /* ---------- Widget 1: the list, newest first ---------- */
+  function fmtDate(t) {
+    const d = new Date(t), opts = { day: 'numeric', month: 'short' };
+    if (d.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+    return 'Added ' + d.toLocaleDateString('en-GB', opts);
+  }
+
+  async function renderList() {
+    let wants = [];
+    try { wants = await getAll(); } catch (e) {}
+    wants.sort((a, b) => b.added - a.added);
+
+    $('count').textContent = wants.length
+      ? `${wants.length} thing${wants.length === 1 ? '' : 's'} you're saving for` : '';
+
+    if (!wants.length) {
+      $('table').innerHTML = `<div class="table"><div class="empty">Nothing here yet.<br>
+        Tap <b>Add</b> to save your first want.</div></div>`;
+      return;
+    }
+    $('table').innerHTML = '<div class="table">' + wants.map(w => `
+      <div class="row">
+        ${w.image
+          ? `<img class="thumb" src="${esc(w.image)}" alt="">`
+          : `<div class="thumb">${esc(w.name.charAt(0).toUpperCase())}</div>`}
+        <div class="info">
+          <div class="title">${esc(w.name)}</div>
+          <div class="meta"><span class="pill">${esc(w.category)}</span><span>${fmtDate(w.added)}</span></div>
+        </div>
+        <button class="del" data-id="${esc(w.id)}" aria-label="Remove">×</button>
+      </div>`).join('') + '</div>';
+  }
+
+  $('table').onclick = async e => {
+    const b = e.target.closest('.del');
+    if (!b || !confirm('Remove this from your wishlist?')) return;
+    await remove(b.dataset.id);
+    renderList();
+  };
+
+  /* ---------- Widget 2: adding a want ---------- */
+  let chosen = null, category = 'Personal', busy = false;
+
+  $('chips').innerHTML = CATEGORIES.map(c =>
+    `<button data-c="${c}" class="${c === category ? 'on' : ''}">${c}</button>`).join('');
+  $('chips').onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    category = b.dataset.c;
+    [...$('chips').children].forEach(x => x.classList.toggle('on', x === b));
+  };
+
+  const updateAdd = () => { $('addBtn').disabled = !chosen || busy; };
+
+  async function fetchJSON(url) {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 8000);
+    try {
+      const r = await fetch(url, { signal: ctl.signal });
+      if (!r.ok) throw new Error(r.status);
+      return await r.json();
+    } finally { clearTimeout(t); }
+  }
+
+  async function searchImages(q) {
+    const e = encodeURIComponent;
+    const sources = [
+      // Wikipedia: the main picture from matching articles
+      fetchJSON(`https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrlimit=5&gsrsearch=${e(q)}&prop=pageimages&piprop=thumbnail&pithumbsize=500`)
+        .then(d => Object.values(d.query?.pages || {}).sort((a, b) => a.index - b.index).map(p => p.thumbnail?.source)),
+      // Openverse: openly licensed photos
+      fetchJSON(`https://api.openverse.org/v1/images/?q=${e(q)}&page_size=8`)
+        .then(d => (d.results || []).map(r => r.thumbnail || r.url)),
+      // Wikimedia Commons: more photos
+      fetchJSON(`https://commons.wikimedia.org/w/api.php?action=query&format=json&origin=*&generator=search&gsrnamespace=6&gsrlimit=8&gsrsearch=${e(q + ' filetype:bitmap')}&prop=imageinfo&iiprop=url&iiurlwidth=500`)
+        .then(d => Object.values(d.query?.pages || {}).sort((a, b) => a.index - b.index).map(p => p.imageinfo?.[0]?.thumburl)),
+    ];
+    const lists = (await Promise.allSettled(sources))
+      .map(r => r.status === 'fulfilled' ? r.value.filter(Boolean) : []);
+    const out = [];
+    for (let i = 0; out.length < 9 && lists.some(l => i < l.length); i++)
+      for (const l of lists) if (l[i] && !out.includes(l[i])) out.push(l[i]);
+    return out.slice(0, 9);
+  }
+
+  async function runSearch() {
+    const q = $('name').value.trim();
+    if (!q) { $('name').focus(); return; }
+    $('name').blur();
+    $('picStep').classList.remove('hidden');
+    chosen = null; updateAdd();
+    $('grid').innerHTML = '';
+
+    if (!navigator.onLine) {
+      $('searchNote').textContent = "You're offline, so use your own photo or add it without one.";
+      return;
+    }
+    $('searchNote').textContent = 'Searching…';
+    const urls = await searchImages(q);
+    if (!urls.length) {
+      $('searchNote').textContent = 'No pictures found. Try different words, or use your own photo.';
+      return;
+    }
+    $('searchNote').textContent = 'Tap the right one, or use your own.';
+    $('grid').innerHTML = urls.map(u => `<img src="${esc(u)}" alt="" loading="lazy">`).join('');
+    $('grid').querySelectorAll('img').forEach(img => img.onerror = () => img.remove());
+  }
+
+  $('findBtn').onclick = runSearch;
+  $('name').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); runSearch(); } };
+
+  $('grid').onclick = e => {
+    if (e.target.tagName !== 'IMG') return;
+    [...$('grid').children].forEach(x => x.classList.toggle('sel', x === e.target));
+    chosen = e.target.src; updateAdd();
+  };
+
+  // Shrinks a picture so it saves quickly and works offline
+  async function shrink(src) {
+    let blob = src;
+    if (typeof src === 'string') {
+      const r = await fetch(src);
+      if (!r.ok) throw new Error('fetch failed');
+      blob = await r.blob();
+    }
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = await new Promise((res, rej) => {
+        const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url;
+      });
+      const s = Math.min(1, 600 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.naturalWidth * s);
+      c.height = Math.round(img.naturalHeight * s);
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg', 0.82);
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  $('file').onchange = async () => {
+    const f = $('file').files[0]; if (!f) return;
+    try {
+      const data = await shrink(f);
+      const img = document.createElement('img');
+      img.src = data;
+      $('grid').prepend(img);
+      [...$('grid').children].forEach(x => x.classList.toggle('sel', x === img));
+      chosen = data; updateAdd();
+      $('searchNote').textContent = 'Got it, your photo is selected.';
+    } catch (e) { alert("Couldn't read that photo. Try another one."); }
+    $('file').value = '';
+  };
+
+  $('googleBtn').onclick = () => {
+    const q = $('name').value.trim();
+    window.open('https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q), '_blank');
+  };
+
+  async function addWant(withPic) {
+    const name = $('name').value.trim();
+    if (!name || busy) return;
+    busy = true; updateAdd();
+    let image = null;
+    if (withPic && chosen) {
+      image = chosen;
+      if (!image.startsWith('data:')) { try { image = await shrink(chosen); } catch (e) {} }
+    }
+    try {
+      await save({ id: newId(), name, category, image, added: Date.now() });
+    } catch (e) { alert("Couldn't save that. Please try again."); }
+    busy = false;
+    $('name').value = ''; $('grid').innerHTML = '';
+    $('picStep').classList.add('hidden');
+    chosen = null; updateAdd();
+    await renderList();
+    show('list');
+  }
+  $('addBtn').onclick = () => addWant(true);
+  $('noPicBtn').onclick = () => addWant(false);
+
+  /* ---------- Home-screen icon (a gift box) ---------- */
+  (function makeIcon() {
+    const c = document.createElement('canvas'); c.width = c.height = 180;
+    const x = c.getContext('2d');
+    x.fillStyle = '#c2627a'; x.fillRect(0, 0, 180, 180);
+    x.fillStyle = '#fff';
+    x.fillRect(48, 96, 84, 48);   // box
+    x.fillRect(40, 70, 100, 22);  // lid
+    x.fillStyle = '#c2627a';
+    x.fillRect(84, 70, 12, 74);   // ribbon
+    x.strokeStyle = '#fff'; x.lineWidth = 7;
+    x.beginPath(); x.ellipse(76, 58, 14, 9, 0.5, 0, Math.PI * 2); x.stroke();
+    x.beginPath(); x.ellipse(104, 58, 14, 9, -0.5, 0, Math.PI * 2); x.stroke();
+    $('appIcon').href = c.toDataURL('image/png');
+  })();
+
+  /* ---------- Offline support + start up ---------- */
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+  if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+  renderList();
+</script>
+</body>
+</html>
